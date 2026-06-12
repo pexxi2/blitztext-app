@@ -5,17 +5,24 @@ enum LLMError: LocalizedError {
     case networkError(String)
     case apiError(String)
     case noContent
+    case invalidURL
 
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "OpenAI API Key fehlt. Bitte in den Einstellungen hinterlegen."
+            let hasLocalLLM = KeychainService.load(key: .localLLMBaseURL) != nil
+            if hasLocalLLM {
+                return "Lokaler LLM nicht erreichbar. Prüfe ob dein Proxy läuft (http://localhost:4000)."
+            }
+            return "OpenAI API Key oder lokaler LLM-Proxy erforderlich. Konfiguriere in den Einstellungen."
         case .networkError(let msg):
             return "Verbindungsproblem: \(msg)"
         case .apiError(let msg):
-            return "Fehler von OpenAI: \(msg)"
+            return "Fehler vom LLM: \(msg)"
         case .noContent:
             return "Keine Antwort erhalten. Bitte nochmal versuchen."
+        case .invalidURL:
+            return "Ungültige LLM URL in den Einstellungen."
         }
     }
 }
@@ -57,7 +64,7 @@ private struct OpenAIErrorResponse: Decodable {
 }
 
 enum LLMService {
-    private static let chatCompletionsURL = URL(string: "https://api.openai.com/v1/chat/completions")!
+    private static let defaultOpenAIURL = URL(string: "https://api.openai.com/v1/chat/completions")!
 
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -67,6 +74,30 @@ enum LLMService {
         configuration.timeoutIntervalForResource = 45
         return URLSession(configuration: configuration)
     }()
+
+    private static var chatCompletionsURL: URL {
+        if let baseURLString = KeychainService.load(key: .localLLMBaseURL),
+           !baseURLString.isEmpty,
+           let baseURL = URL(string: baseURLString) {
+            return baseURL.appendingPathComponent("v1/chat/completions")
+        }
+        return defaultOpenAIURL
+    }
+
+    private static var apiKey: String? {
+        if KeychainService.load(key: .localLLMBaseURL) != nil {
+            let llmKey = KeychainService.load(key: .localLLMAPIKey) ?? ""
+            return llmKey.isEmpty ? "placeholder" : llmKey
+        }
+        return KeychainService.load(key: .openAIAPIKey)
+    }
+
+    private static var usingLocalLLM: Bool {
+        if let baseURL = KeychainService.load(key: .localLLMBaseURL) {
+            return !baseURL.isEmpty
+        }
+        return false
+    }
 
     static func improve(
         text: String,
@@ -113,12 +144,21 @@ enum LLMService {
         model: RewriteModel,
         temperature: Double
     ) async throws -> String {
-        guard let apiKey = KeychainService.load(key: .openAIAPIKey) else {
+        let hasOpenAIKey = KeychainService.load(key: .openAIAPIKey) != nil
+        let hasLocalLLM = KeychainService.load(key: .localLLMBaseURL) != nil
+
+        guard hasOpenAIKey || hasLocalLLM else {
             throw LLMError.notConfigured
         }
 
+        guard let apiKey = apiKey, !apiKey.isEmpty else {
+            throw LLMError.notConfigured
+        }
+
+        let modelName = usingLocalLLM ? "stackit-qwen" : model.rawValue
+
         let payload = OpenAIChatRequest(
-            model: model.rawValue,
+            model: modelName,
             messages: [
                 .init(role: "system", content: systemPrompt),
                 .init(role: "user", content: text),

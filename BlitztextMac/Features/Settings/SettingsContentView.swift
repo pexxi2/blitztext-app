@@ -62,13 +62,19 @@ struct AccessSettingsView: View {
 
     private enum FieldFocus {
         case openAIAPIKey
+        case localLLMBaseURL
+        case localLLMAPIKey
     }
 
     @State private var launchAtLoginService = LaunchAtLoginService()
     @State private var currentInstallLocation = BlitztextInstallLocationService.currentInstallLocation
     @State private var openAIAPIKey = ""
+    @State private var localLLMBaseURL = ""
+    @State private var localLLMAPIKey = ""
     @State private var editingAPIKey = false
+    @State private var editingLocalLLM = false
     @State private var saved = false
+    @State private var localLLMSaved = false
     @State private var saveErrorText: String?
     @State private var installActionErrorText: String?
     @State private var showCleanupOptions = false
@@ -114,6 +120,106 @@ struct AccessSettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
+                SectionLabel(text: "Lokales LLM (Optional)")
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Nutze einen lokalen LLM-Proxy statt OpenAI")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+
+                    if appState.hasValue(for: .localLLMBaseURL) && !editingLocalLLM {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("LLM Proxy konfiguriert")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                if appState.hasValue(for: .localLLMAPIKey) {
+                                    Text("API Key gespeichert")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                            Spacer()
+                            Button("Ändern") { editingLocalLLM = true }
+                                .font(.system(size: 10, weight: .medium))
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.blue)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                        )
+                        .onChange(of: editingLocalLLM) { _, newValue in
+                            if newValue && localLLMBaseURL.isEmpty {
+                                localLLMBaseURL = KeychainService.load(key: .localLLMBaseURL) ?? ""
+                                localLLMAPIKey = KeychainService.load(key: .localLLMAPIKey) ?? ""
+                            }
+                        }
+                    } else if editingLocalLLM || !appState.hasValue(for: .localLLMBaseURL) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("http://localhost:4000", text: $localLLMBaseURL)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11.5))
+                                .focused($focusedField, equals: .localLLMBaseURL)
+
+                            TextField("API Key (optional)", text: $localLLMAPIKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11.5))
+                                .focused($focusedField, equals: .localLLMAPIKey)
+
+                            HStack(spacing: 8) {
+                                Button("Abbrechen") {
+                                    editingLocalLLM = false
+                                    localLLMBaseURL = ""
+                                    localLLMAPIKey = ""
+                                    localLLMSaved = false
+                                }
+                                .buttonStyle(SubtleButtonStyle())
+
+                                Button {
+                                    saveLocalLLMSettings()
+                                } label: {
+                                    if localLLMSaved {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 10, weight: .bold))
+                                            Text("Gespeichert")
+                                        }
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(.green)
+                                    } else {
+                                        Text("Speichern")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                                .buttonStyle(SubtleButtonStyle())
+                                .animation(.easeInOut(duration: 0.2), value: localLLMSaved)
+                            }
+
+                            if let saveErrorText {
+                                Text(saveErrorText)
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(.red)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+
+                    if editingLocalLLM || appState.hasValue(for: .localLLMBaseURL) {
+                        Button("Auf OpenAI zurücksetzen") {
+                            clearLocalLLMSettings()
+                        }
+                        .font(.system(size: 10, weight: .medium))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     SectionLabel(text: "OpenAI API Key")
                     Spacer()
@@ -154,7 +260,7 @@ struct AccessSettingsView: View {
                     }
                 }
 
-                Text("Dein Key bleibt lokal in dieser App. Audio und Text werden direkt an die OpenAI API gesendet.")
+                Text("Dein Key bleibt lokal in dieser App.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -359,7 +465,7 @@ struct AccessSettingsView: View {
             launchAtLoginService.refresh()
             refreshInstallState()
             load()
-            if !appState.hasValue(for: .openAIAPIKey) {
+            if !appState.hasValue(for: .openAIAPIKey) && !appState.hasValue(for: .localLLMBaseURL) {
                 editingAPIKey = true
                 focusedField = .openAIAPIKey
             }
@@ -368,6 +474,55 @@ struct AccessSettingsView: View {
 
     private func load() {
         openAIAPIKey = ""
+        if let baseURL = KeychainService.load(key: .localLLMBaseURL) {
+            localLLMBaseURL = baseURL
+        }
+        if let apiKey = KeychainService.load(key: .localLLMAPIKey) {
+            localLLMAPIKey = apiKey
+        }
+    }
+
+    private func saveLocalLLMSettings() {
+        let trimmedURL = localLLMBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAPIKey = localLLMAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedURL.isEmpty else {
+            saveErrorText = "Bitte trage die LLM Base URL ein."
+            return
+        }
+
+        do {
+            try KeychainService.save(key: .localLLMBaseURL, value: trimmedURL)
+            if !trimmedAPIKey.isEmpty {
+                try KeychainService.save(key: .localLLMAPIKey, value: trimmedAPIKey)
+            }
+            KeychainService.invalidateCache()
+
+            editingLocalLLM = false
+            localLLMBaseURL = ""
+            localLLMAPIKey = ""
+            saveErrorText = nil
+
+            withAnimation(.easeInOut(duration: 0.2)) { localLLMSaved = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                withAnimation(.easeInOut(duration: 0.2)) { localLLMSaved = false }
+            }
+        } catch {
+            saveErrorText = "Fehler beim Speichern: \(error.localizedDescription)"
+        }
+    }
+
+    private func clearLocalLLMSettings() {
+        KeychainService.delete(key: .localLLMBaseURL)
+        KeychainService.delete(key: .localLLMAPIKey)
+        KeychainService.invalidateCache()
+        editingLocalLLM = false
+        localLLMBaseURL = ""
+        localLLMAPIKey = ""
+        withAnimation(.easeInOut(duration: 0.2)) { saved = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation(.easeInOut(duration: 0.2)) { saved = false }
+        }
     }
 
     private func save() {

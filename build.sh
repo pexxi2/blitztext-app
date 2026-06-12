@@ -104,8 +104,22 @@ else
     exit 1
 fi
 
-# Bauen
+# Extended Attributes vorab entfernen (verhindert codesign-Fehler)
+xattr -cr "$PROJECT_DIR/Resources/Assets.xcassets" 2>/dev/null || true
+
+# Bauen (clean zuerst, dann xattrs bereinigen, dann build)
 echo "🔨 Baue Blitztext ..."
+xcodebuild \
+    -project BlitztextMac.xcodeproj \
+    -scheme BlitztextMac \
+    -destination 'platform=macOS' \
+    -configuration "$BUILD_CONFIGURATION" \
+    -derivedDataPath "$DERIVED_DATA_PATH" \
+    clean 2>&1 | tail -3
+
+# xattrs aus SourcePackages nach clean bereinigen
+xattr -cr "$DERIVED_DATA_PATH/SourcePackages" 2>/dev/null || true
+
 xcodebuild \
     -project BlitztextMac.xcodeproj \
     -scheme BlitztextMac \
@@ -114,7 +128,13 @@ xcodebuild \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     ONLY_ACTIVE_ARCH=NO \
     ARCHS="$UNIVERSAL_ARCHS" \
-    clean build
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_ALLOWED=NO \
+    build
+
+# xattrs nach dem Build entfernen, bevor das Script selbst signiert
+xattr -cr "$DERIVED_DATA_PATH/Build/Products/$BUILD_CONFIGURATION/" 2>/dev/null || true
 
 # App finden
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/$BUILD_CONFIGURATION/Blitztext.app"
@@ -138,6 +158,7 @@ cp -f "$PROJECT_DIR/Resources/menubar_icon@2x.png" "$RESOURCES_DIR/" 2>/dev/null
 DEST="$SCRIPT_DIR/Blitztext.app"
 rm -rf "$DEST"
 cp -R "$APP_PATH" "$DEST"
+xattr -cr "$DEST" 2>/dev/null || true
 echo "🔏 Signiere lokale Development-App ad-hoc. Dieses Artefakt ist nicht notarisiert."
 codesign --force --sign - "$DEST" 2>&1
 verify_universal_app "$DEST"
@@ -154,6 +175,7 @@ if [ "$INSTALL_APP" = true ]; then
     fi
     rm -rf "$INSTALL_DEST"
     cp -R "$DEST" "$INSTALL_DEST"
+    xattr -cr "$INSTALL_DEST" 2>/dev/null || true
     echo "🔏 Signiere lokale Development-App ad-hoc. Dieses Artefakt ist nicht notarisiert."
     codesign --force --sign - "$INSTALL_DEST" 2>&1
     verify_universal_app "$INSTALL_DEST"

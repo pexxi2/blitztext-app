@@ -80,11 +80,11 @@ final class TextImprovementWorkflow: Workflow {
             }
 
             do {
-                // Phase 1: Whisper transcription
-                let rawText = try await TranscriptionService.transcribe(
+                // Phase 1: Whisper transcription (lokal)
+                let rawText = try await LocalTranscriptionService.shared.transcribe(
                     audioURL: url,
-                    customTerms: vocabularyHints,
-                    language: language
+                    language: language,
+                    modelName: LocalTranscriptionService.recommendedFastModelName
                 )
                 let cleanedRawText = TranscriptionQualityService.cleanedTranscript(rawText)
                 guard !TranscriptionQualityService.isLikelyArtifact(cleanedRawText, recordingDuration: recordingDuration) else {

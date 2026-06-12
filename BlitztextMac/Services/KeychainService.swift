@@ -3,10 +3,14 @@ import Security
 
 enum KeychainKey: String, CaseIterable, Codable {
     case openAIAPIKey = "openAIAPIKey"
+    case localLLMBaseURL = "localLLMBaseURL"
+    case localLLMAPIKey = "localLLMAPIKey"
 
     var label: String {
         switch self {
         case .openAIAPIKey: return "OpenAI API Key"
+        case .localLLMBaseURL: return "Lokale LLM Base URL"
+        case .localLLMAPIKey: return "Lokale LLM API Key"
         }
     }
 }
@@ -67,7 +71,7 @@ enum KeychainService {
     }
 
     static var isConfigured: Bool {
-        load(key: .openAIAPIKey) != nil
+        load(key: .openAIAPIKey) != nil || load(key: .localLLMBaseURL) != nil
     }
 
     private static func baseQuery(for key: KeychainKey) -> [String: Any] {

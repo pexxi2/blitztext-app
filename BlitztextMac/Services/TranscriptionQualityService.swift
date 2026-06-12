@@ -22,11 +22,11 @@ enum TranscriptionQualityService {
             return true
         }
 
-        if recordingDuration < 0.55 && (words.count >= 5 || cleaned.count >= 32) {
+        if recordingDuration < 0.3 && (words.count >= 10 || cleaned.count >= 64) {
             return true
         }
 
-        if recordingDuration < 0.8 && cleaned.count >= 56 {
+        if recordingDuration < 0.5 && cleaned.count >= 100 {
             return true
         }
 
